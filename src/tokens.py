@@ -16,10 +16,10 @@ class CommonToken:
         return len(text) >= 1 
 
     @classmethod
-    def parse(cls, text):
+    def parse(cls, token_str):
         # indicator = text[0]
-        assert cls.is_match(text)
-        body = text[1]
+        assert cls.is_match(token_str)
+        body = token_str[1]
         return CommonToken(body)
 
     def __str__(self):
@@ -28,23 +28,27 @@ class CommonToken:
 
 
 class BooleanToken(CommonToken):
-    @staticmethod
-    def is_match(text):
-        return (len(text) == 2) and (text[0] in "TF")
+
+    def __init__(self, value):
+        self.value = value
+        self.indicator = "T" if value else "F"
+        self.body = ""
 
     @classmethod
-    def parse(cls, text):
-        indicator = text[0]
-        body = text[1:]
-        value = None
-        if indicator == "T":
-            value = True
-        if indicator == "F":
-            value = False
-        return BooleanToken(indicator, body, value=value)
+    def is_match(cls, text):
+        return (len(text) == 1) and (text[0] in "TF")
+
+    @classmethod
+    def parse(cls, token_str):
+        indicator = token_str[0]
+        assert indicator in "TF"
+        value = indicator == "T"
+        
+        return BooleanToken(value)
 
     def __call__(self):
         return self.value
+        
 
 
 STRING_DECODING_RULE = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!\"#$%&\'()*+,-./:;<=>?@[\\]^_`|~ \n"
@@ -64,21 +68,26 @@ def encode(string):
 
 
 class StringToken(CommonToken):
-    @staticmethod
-    def is_match(text):
+    INDICATOR = "S"
+    def __init__(self, value, body=None):
+        self.value = value
+        if body is None:
+            self.body = encode(value)
+        else:
+            self.body = body
+        
+    @classmethod
+    def is_match(cls, text):
         return (len(text) >= 1) and (text[0] == "S")
 
     @classmethod
-    def parse_text(cls, text):
-        return cls(indicator="S", body=encode(text), value=text)
-
-    @classmethod
-    def parse(cls, text):
-        indicator = text[0]
-        body = text[1:]
+    def parse(cls, token_str):
+        indicator = token_str[0]
+        assert indicator == cls.INDICATOR
+        body = token_str[1:]
         value = decode(body)
         
-        return cls(indicator, body, value=value)
+        return cls(value, body=body)
 
     def __call__(self):
         return self.value
@@ -102,22 +111,23 @@ def from_base94(base94_str, base_number=94, zero_char='!'):
 
 
 class IntegerToken(CommonToken):
-    def __init__(self, number):
-        self.indicator = "I"
-        self.body = to_base94(number)
-        self.value = number
+    INDICATOR = "I"
+    def __init__(self, value, body=None):
+        self.value = value
+        self.body = to_base94(value) if body is None else body
 
-    @staticmethod
-    def is_match(text):
-        return (len(text) >= 2) and (text[0] == "I")
+    @classmethod
+    def is_match(cls, text):
+        return (len(text) >= 2) and (text[0] == cls.INDICATOR)
     
     @classmethod
-    def parse(cls, text):
-        indicator = text[0]
-        body = text[1:]
+    def parse(cls, token_str):
+        indicator = token_str[0]
+        assert indicator == cls.INDICATOR
+        body = token_str[1:]
         value = from_base94(body)
         
-        return cls(indicator, body, value=value)
+        return cls(value, body=body)
 
     def __call__(self):
         return self.value
@@ -125,7 +135,7 @@ class IntegerToken(CommonToken):
 
 class UnaryToken(CommonToken):
     NUM_PARAMETERS = 1
-    INDICATOR = "B"
+    INDICATOR = "U"
     TOKEN_EXPRESSIONS = {
         '-': lambda x: -x,
         '!': lambda x: not x,
@@ -227,7 +237,7 @@ class IfToken(CommonToken):
     NUM_PARAMETERS = 3
     INDICATOR = "?"
 
-    def __init__(self, parameters):
+    def __init__(self, name, parameters):
         # self.indicator = "B"
         # assert self.is_match(start_token)
         assert len(parameters) == self.NUM_PARAMETERS
@@ -262,13 +272,15 @@ class IfToken(CommonToken):
 
 class LambdaToken(CommonToken):
     INDICATOR = "L"
-    def __init__(self, number, body):
-        self.number = number
-        self.body = body
+    NUM_PARAMETERS = 1
+    def __init__(self, name, parameters):
+        self.number = from_base94(name)
+        self.body = parameters[0]
 
     @classmethod
     def is_match(cls, text):
         return (len(text) >= 2) and (text[0] == cls.INDICATOR)
+    
     @classmethod
     def parse(cls, start_token, body):
         # indicator = text[0]
@@ -286,9 +298,9 @@ class LambdaToken(CommonToken):
 
 class VariableToken(CommonToken):
     INDICATOR = "v"
-    def __init__(self, number):
-        self.number = number
-        self.body = to_base94(number)
+    def __init__(self, body):
+        self.number = from_base94(body)
+        self.body = body
     
     @classmethod
     def is_match(cls, text):
