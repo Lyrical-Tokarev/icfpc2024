@@ -30,7 +30,7 @@ I've also solved first several tasks manually.
 
 ## Requirements
 
-Code was run in local environment (with python 3.8+) and relies the following packages:
+Code was run in local environment (with python 3.10+) and relies the following packages:
 
 ```
 numpy
