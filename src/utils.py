@@ -10,6 +10,7 @@ def partial_parse(token_list: List[str]):
     # print(next_token_str, token_list[1:])
     for simple_token_class in [tokens.BooleanToken, tokens.StringToken, tokens.IntegerToken, tokens.VariableToken]:
         if simple_token_class.is_match(next_token_str):
+            # print(simple_token_class.__name__)
             next_token = simple_token_class.parse(next_token_str)
             return next_token, token_list[1:]
     for op_token_class in [tokens.UnaryToken, tokens.BinaryToken, tokens.IfToken, tokens.LambdaToken]:

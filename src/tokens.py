@@ -1,10 +1,11 @@
 from dataclasses import dataclass
-
+import numpy as np
 
 @dataclass
 class CommonToken:
     """Class for tokens"""
     INDICATOR = None
+    NUM_PARAMETERS = 0
     def __init__(self, indicator: str, body: str, value=None):
         self.indicator = indicator
         self.body = body
@@ -19,16 +20,24 @@ class CommonToken:
     def parse(cls, token_str):
         # indicator = text[0]
         assert cls.is_match(token_str)
-        body = token_str[1]
+        body = token_str[1:]
         return CommonToken(body)
 
     def __str__(self):
         return f"{self.INDICATOR}{self.body}"
+    @property
+    def is_complex(self):
+        return self.NUM_PARAMETERS > 0
+
+    @property
+    def has_lambdas(self):
+        return False
     
+    def simplify(self):
+        pass
 
 
 class BooleanToken(CommonToken):
-
     def __init__(self, value):
         self.value = value
         self.indicator = "T" if value else "F"
@@ -46,7 +55,10 @@ class BooleanToken(CommonToken):
         
         return BooleanToken(value)
 
-    def __call__(self):
+    def __call__(self, variables={}):
+        return self.value
+
+    def show(self):
         return self.value
         
 
@@ -89,7 +101,10 @@ class StringToken(CommonToken):
         
         return cls(value, body=body)
 
-    def __call__(self):
+    def __call__(self, variables={}):
+        return self.value
+
+    def show(self):
         return self.value
 
 
@@ -129,8 +144,25 @@ class IntegerToken(CommonToken):
         
         return cls(value, body=body)
 
-    def __call__(self):
+    def __call__(self, variables={}):
         return self.value
+
+    def show(self):
+        return self.value
+
+
+def wrap_with_token(value):
+    token = None
+    if isinstance(value, str):
+        token = StringToken(value)
+    elif isinstance(value, bool):
+        token = BooleanToken(value)
+    elif isinstance(value, int):
+        if value < 0:
+            token = UnaryToken("-", IntegerToken(-value))
+        else:
+            token = IntegerToken(value)
+    return token
 
 
 class UnaryToken(CommonToken):
@@ -139,29 +171,53 @@ class UnaryToken(CommonToken):
     TOKEN_EXPRESSIONS = {
         '-': lambda x: -x,
         '!': lambda x: not x,
-        '#': lambda x: from_base94(x),
-        '$': lambda x: to_base94(x)
+        '#': lambda x: from_base94(x), # from_base94(x),
+        '$': lambda x: decode(x), # to_base94(x)
     }
 
     def __init__(self, name, parameters):
         # assert self.is_match(start_token)
         self.name = name #start_token[1:]
-        self.parameter = parameters[0]
+        if isinstance(parameters, list):
+            parameters = parameters[0]
+        self.parameter = parameters
         self.cached_value = None
 
     @classmethod
     def is_match(cls, text):
         return (len(text) >= 2) and (text[0] == cls.INDICATOR)
 
-    def __call__(self):
-        computed_parameter = self.parameter()
+    def __call__(self, variables={}):
+        computed_parameter = self.parameter(variables=variables)
         if self.cached_value is not None:
             return self.cached_value
+        print("param", self.name)
+        if self.name == "#":
+            computed_parameter = wrap_with_token(computed_parameter).body
+        elif self.name == "$":
+            # print("param", computed_parameter)
+            computed_parameter = wrap_with_token(computed_parameter).body
         self.cached_value = self.TOKEN_EXPRESSIONS[self.name](computed_parameter)
         return self.cached_value
     def __str__(self):
         data = [f"{self.INDICATOR}{self.name}", str(self.parameter)]
         return " ".join(data)
+
+    def show(self):
+        a_str = self.parameter.show()
+        return ["U" + self.name, a_str]
+
+    def simplify(self):
+        if self.parameter.has_lambdas:
+            self.parameter.simplify()
+        else:
+            value = self.parameter()
+            self.parameter = wrap_with_token(value)
+    @property
+    def has_lambdas(self):
+        return self.parameter.has_lambdas
+
+
 
 
 class BinaryToken(CommonToken):
@@ -191,9 +247,9 @@ class BinaryToken(CommonToken):
         '+': lambda x, y: x + y if isinstance(x, int) and isinstance(y, int) else None,
         '-': lambda x, y: x - y if isinstance(x, int) and isinstance(y, int) else None,
         '*': lambda x, y: x * y if isinstance(x, int) and isinstance(y, int) else None,
-        '/': lambda x, y: x // y if isinstance(x, int) and isinstance(y, int) else None,
+        '/': lambda x, y: np.sign(x)*np.sign(y)*(np.abs(x) // np.abs(y)) if isinstance(x, int) and isinstance(y, int) else None,
         
-        '%': lambda x, y: x % y if isinstance(x, int) and isinstance(y, int) else None,
+        '%': lambda x, y: np.sign(x)*np.sign(y)*(np.abs(x) % np.abs(y)) if isinstance(x, int) and isinstance(y, int) else None,
         '<': lambda x, y: x < y if isinstance(x, int) and isinstance(y, int) else None,
         '>': lambda x, y: x > y if isinstance(x, int) and isinstance(y, int) else None,
         '=': lambda x, y: x == y,
@@ -208,7 +264,6 @@ class BinaryToken(CommonToken):
         
         '$': lambda x, y: x.apply(y),
     }
-    
 
     def __init__(self, name, parameters):
         # self.indicator = "B"
@@ -221,9 +276,17 @@ class BinaryToken(CommonToken):
     def is_match(cls, text):
         return (len(text) >= 2) and (text[0] == cls.INDICATOR)
     
-    def __call__(self):
-        computed_parameter0 = self.parameters[0]()
-        computed_parameter1 = self.parameters[1]()
+    def __call__(self, variables={}):
+        computed_parameter0 = self.parameters[0](variables=variables)
+        # add optimization for boolean values
+        if self.name == "|" and computed_parameter0:
+            self.cached_value = True
+            return self.cached_value
+        if self.name == "&" and not computed_parameter0:
+            self.cached_value = False
+            return self.cached_value
+        # do regular stuff
+        computed_parameter1 = self.parameters[1](variables=variables)
         if self.cached_value is not None:
             return self.cached_value
         self.cached_value = self.TOKEN_EXPRESSIONS[self.name](computed_parameter0, computed_parameter1)
@@ -231,6 +294,32 @@ class BinaryToken(CommonToken):
     def __str__(self):
         data = [f"{self.INDICATOR}{self.name}"]+[str(p) for p in self.parameters]
         return " ".join(data)
+    
+    def show(self):
+        a_str = self.parameters[0].show()
+        b_str = self.parameters[1].show()
+        return ["B"+self.name, a_str, b_str]
+    @property
+    def has_lambdas(self):
+        return self.parameters[0].has_lambdas or self.parameters[1].has_lambdas
+
+    def simplify(self):
+        # evaluate parameters if they are not 
+        p0 = self.parameters[0]
+        if p0.has_lambdas:
+            p0.simplify()
+        else:
+            p0_value = p0()
+            p0 = wrap_with_token(p0_value)
+            self.parameters[0] = p0
+        p1 = self.parameters[1]
+        if p1.has_lambdas:
+            p1.simplify()
+        else:
+            p1_value = p1()
+            p1 = wrap_with_token(p1_value)
+            self.parameters[1] = p1
+        
 
 
 class IfToken(CommonToken):
@@ -251,15 +340,15 @@ class IfToken(CommonToken):
     def is_match(cls, text):
         return (len(text) >= 1) and (text[0] == cls.INDICATOR)
     
-    def __call__(self):
+    def __call__(self, variables={}):
         if self.cached_value is not None:
             return self.cached_value
-        computed_parameter_condition = self.condition()
+        computed_parameter_condition = self.condition(variables=variables)
         if computed_parameter_condition:
-            computed_parameter = self.t_value()
+            computed_parameter = self.t_value(variables=variables)
             self.cached_value = computed_parameter
         else:
-            computed_parameter = self.f_value()
+            computed_parameter = self.f_value(variables=variables)
             self.cached_value = computed_parameter
 
         return self.cached_value
@@ -267,43 +356,126 @@ class IfToken(CommonToken):
     def __str__(self):
         data = [self.INDICATOR, str(self.condition), str(self.t_value), str(self.f_value)]
         return " ".join(data)
-        
+
+    def show(self):
+        return {
+            "if": self.condition.show(),
+            "value_true": self.t_value.show(),
+            "value_false": self.f_value.show(),
+        }
+
+    @property
+    def has_lambdas(self):
+        return self.condition.has_lambdas or self.t_value.has_lambdas or self.f_value.has_lambdas
+    def simplify(self):
+        if self.condition.has_lambdas:
+            self.condition.simplify()
+        else:
+            value = self.condition()
+            self.condition = wrap_with_token(value)
+            if value:
+                if self.t_value.has_lambdas:
+                    self.t_value.simplify()
+                else:
+                    value = self.t_value()
+                    self.t_value = wrap_with_token(value)
+                self.f_value(wrap_with_token('any value'))
+            else:
+                self.t_value(wrap_with_token('any value'))
+                if self.f_value.has_lambdas:
+                    self.f_value.simplify()
+                else:
+                    value = self.f_value()
+                    self.f_value = wrap_with_token(value)
+            return
+        # 
+        if self.t_value.has_lambdas:
+            self.t_value.simplify()
+        else:
+            value = self.t_value()
+            self.t_value = wrap_with_token(value)
+        if self.f_value.has_lambdas:
+            self.f_value.simplify()
+        else:
+            value = self.f_value()
+            self.f_value = wrap_with_token(value)
     
 
 class LambdaToken(CommonToken):
     INDICATOR = "L"
     NUM_PARAMETERS = 1
-    def __init__(self, name, parameters):
-        self.number = from_base94(name)
-        self.body = parameters[0]
+    def __init__(self, number, parameters):
+        # self.number = from_base94(name)
+        if isinstance(number, str):
+            number = from_base94(number)
+        self.number = number
+        # self.body = body
+        self.expression = parameters[0]
 
     @classmethod
     def is_match(cls, text):
         return (len(text) >= 2) and (text[0] == cls.INDICATOR)
     
     @classmethod
-    def parse(cls, start_token, body):
+    def parse(cls, start_token, parameters):
+        # expression = parameters
         # indicator = text[0]
         number = from_base94(start_token[1:])
         # value = from_base94(body)
         
-        return cls(number, body)
+        return cls(number, parameters)
 
     def __str__(self):
+        # print(self.number, type(self.number))
         encoded_number = to_base94(self.number)
         start_token = f"{self.INDICATOR}{encoded_number}"
-        next_token = str(self.body)
-        return f"{start_token} {next_token}"
+        next_tokens = str(self.expression)
+        return f"{start_token} {next_tokens}"
+
+    def show(self):
+        return {f"{self.INDICATOR}{self.number}": self.expression.show()}
+    @property
+    def has_lambdas(self):
+        return True
+    #def apply(self, token):
+    #    self.expression()
+    #    pass
+    # def __call__(self, variables={}):
+    #     ???
+    #     if self.cached_value is not None:
+    #         return self.cached_value
+    #     computed_parameter_condition = self.condition()
+    #     if computed_parameter_condition:
+    #         computed_parameter = self.t_value()
+    #         self.cached_value = computed_parameter
+    #     else:
+    #         computed_parameter = self.f_value()
+    #         self.cached_value = computed_parameter
+
+    #     return self.cached_value
     
 
 class VariableToken(CommonToken):
     INDICATOR = "v"
-    def __init__(self, body):
-        self.number = from_base94(body)
-        self.body = body
+    def __init__(self, number):
+        self.number = number
+        self.body = to_base94(number)
     
     @classmethod
-    def is_match(cls, text):
-        return (len(text) >= 2) and (text[0] == cls.INDICATOR)
+    def is_match(cls, token_str):
+        return (len(token_str) >= 2) and (token_str[0] == cls.INDICATOR)
+
+    @classmethod
+    def parse(cls, token_str):
+        # indicator = text[0]
+        assert cls.is_match(token_str)
+        body = token_str[1:]
+        number = from_base94(body)
+        return cls(number)
+    def __str__(self):
+        return F"{self.INDICATOR}{self.body}"
+    
+    def show(self):
+        return F"{self.INDICATOR}{self.number}"
     
 
