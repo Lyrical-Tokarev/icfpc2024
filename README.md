@@ -26,3 +26,17 @@ Ideas to implement
 It seems obvious that in this task we just have to sort the desired positions in the right way, however, I haven't thought about how to deal with the situation when some positions near each other, or situations when some positions are missing. I don't want to solve each of the puzzles as a separate complex optimization task.
 
 I've also solved first several tasks manually.
+
+
+## Requirements
+
+Code was run in local environment (with python 3.8+) and relies the following packages:
+
+```
+numpy
+pandas
+networkx
+matplotlib
+seaborn
+
+```

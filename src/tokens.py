@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 import numpy as np
+import networkx as nx
+
 
 @dataclass
 class CommonToken:
@@ -36,7 +38,31 @@ class CommonToken:
     def simplify(self):
         pass
 
+    def graph_data(self, prefix=""):
+        pass
+    
+    def graph(self):
+        ast_graph = nx.DiGraph()
+        nodes, node_labels, edges_list = self.graph_data()
+        if len(node_labels)> 0:
+            node_labels[0] = "Root: " + node_labels[0]
+        node_data = [(node, dict(label=label)) for node, label in zip(nodes, node_labels)]
+        ast_graph.add_nodes_from(node_data)
+        ast_graph.add_edges_from(edges_list)
+        return ast_graph
 
+
+# '=': lambda x, y: x == y,
+
+# '|': lambda x, y: x or y if isinstance(x, bool) and isinstance(y, bool) else None,
+# '&': lambda x, y: x and y if isinstance(x, bool) and isinstance(y, bool) else None,
+
+# '.': lambda x, y: x + y if isinstance(x, str) and isinstance(y, str) else None,
+
+# 'T': lambda x, y: y[:x] if isinstance(x, int) and isinstance(y, str) else None,
+# 'D': lambda x, y: y[x:] if isinstance(x, int) and isinstance(y, str) else None,
+        
+        
 class BooleanToken(CommonToken):
     def __init__(self, value):
         self.value = value
@@ -60,6 +86,12 @@ class BooleanToken(CommonToken):
 
     def show(self):
         return self.value
+
+    def graph_data(self, prefix=""):
+        return [prefix + self.indicator], [self.indicator], []
+
+    def substitute(self, number, token):
+        pass
         
 
 
@@ -106,6 +138,11 @@ class StringToken(CommonToken):
 
     def show(self):
         return self.value
+    
+    def graph_data(self, prefix=""):
+        return [ prefix+"s" ], [ repr(self.value) ], []
+    def substitute(self, number, token):
+        pass
 
 
 
@@ -124,6 +161,14 @@ def from_base94(base94_str, base_number=94, zero_char='!'):
         number += ord(ch) - ord(zero_char)
     return number
 
+# '+': lambda x, y: x + y if isinstance(x, int) and isinstance(y, int) else None,
+# '-': lambda x, y: x - y if isinstance(x, int) and isinstance(y, int) else None,
+# '*': lambda x, y: x * y if isinstance(x, int) and isinstance(y, int) else None,
+# '/': lambda x, y: np.sign(x)*np.sign(y)*(np.abs(x) // np.abs(y)) if isinstance(x, int) and isinstance(y, int) else None,
+
+# '%': lambda x, y: np.sign(x)*np.sign(y)*(np.abs(x) % np.abs(y)) if isinstance(x, int) and isinstance(y, int) else None,
+# '<': lambda x, y: x < y if isinstance(x, int) and isinstance(y, int) else None,
+# '>': lambda x, y: x > y if isinstance(x, int) and isinstance(y, int) else None,
 
 class IntegerToken(CommonToken):
     INDICATOR = "I"
@@ -149,6 +194,21 @@ class IntegerToken(CommonToken):
 
     def show(self):
         return self.value
+
+    def graph_data(self, prefix=""):
+        return [ prefix+"i" ], [ str(self.value) ], []
+
+    def substitute(self, number, token):
+        pass
+    # def __add__(a, b):
+    #     return IntegerToken(a.value + b.value)
+    # def __sub__(a, b):
+    #     return IntegerToken(a.value - b.value)
+    # def __mul__(a, b):
+    #     return IntegerToken(a.value * b.value)
+    # def __floordiv__(a, b):
+    #     value = np.sign(a.value)*np.sign(b.value)*(np.abs(a.value) // np.abs(b.value)) 
+    #     return IntegerToken(value)
 
 
 def wrap_with_token(value):
@@ -216,8 +276,15 @@ class UnaryToken(CommonToken):
     @property
     def has_lambdas(self):
         return self.parameter.has_lambdas
+    
+    def graph_data(self, prefix=""):
+        nodes, node_labels, edges_list = self.parameter.graph_data(prefix + "u")
+        return [ prefix + "u" ] + nodes, [ f"{self.INDICATOR}{self.name}" ] + node_labels, [(prefix + "u", nodes[0])] + edges_list
 
-
+    def substitute(self, number, token):
+        if self.expression.INDICATOR == 'v' and self.expression.number == number:
+            # we have variable, let's replace it
+            self.expression = token
 
 
 class BinaryToken(CommonToken):
@@ -277,7 +344,12 @@ class BinaryToken(CommonToken):
         return (len(text) >= 2) and (text[0] == cls.INDICATOR)
     
     def __call__(self, variables={}):
-        computed_parameter0 = self.parameters[0](variables=variables)
+        self.parameters[0].simplify()
+        if self.parameters[0].INDICATOR == 'L':
+            computed_parameter0 = self.parameters[0]
+        else:
+            computed_parameter0 = self.parameters[0](variables=variables)
+            
         # add optimization for boolean values
         if self.name == "|" and computed_parameter0:
             self.cached_value = True
@@ -319,7 +391,23 @@ class BinaryToken(CommonToken):
             p1_value = p1()
             p1 = wrap_with_token(p1_value)
             self.parameters[1] = p1
-        
+
+    def graph_data(self, prefix=""):
+        nodes0, node_labels0, edges_list0 = self.parameters[0].graph_data(prefix + "b0")
+        nodes1, node_labels1, edges_list1 = self.parameters[1].graph_data(prefix + "b1")
+        nodes = [prefix + "b"] + nodes0 + nodes1
+        node_labels = [f"{self.INDICATOR}{self.name}"] + node_labels0 + node_labels1
+        edges_list = [(prefix + "b", nodes0[0]), (prefix + "b", nodes1[0])] + edges_list0 + edges_list1
+        return nodes, node_labels, edges_list
+    
+    def substitute(self, number, token):
+        if self.parameters[0].INDICATOR == 'v' and self.parameters[0].number == number:
+            # we have variable, let's replace it
+            self.parameters[0] = token
+        if self.parameters[1].INDICATOR == 'v' and self.parameters[1].number == number:
+            # we have variable, let's replace it
+            self.parameters[1] = token
+
 
 
 class IfToken(CommonToken):
@@ -367,6 +455,7 @@ class IfToken(CommonToken):
     @property
     def has_lambdas(self):
         return self.condition.has_lambdas or self.t_value.has_lambdas or self.f_value.has_lambdas
+    
     def simplify(self):
         if self.condition.has_lambdas:
             self.condition.simplify()
@@ -399,6 +488,27 @@ class IfToken(CommonToken):
         else:
             value = self.f_value()
             self.f_value = wrap_with_token(value)
+
+    def graph_data(self, prefix=""):
+        nodes_c, node_labels_c, edges_list_c = self.condition.graph_data(prefix + "if.c")
+        nodes_t, node_labels_t, edges_list_t = self.t_value.graph_data(prefix + "if.t")
+        nodes_f, node_labels_f, edges_list_f = self.f_value.graph_data(prefix + "if.f")
+        
+        nodes = [prefix + "if"] + nodes_c + nodes_t + nodes_f
+        node_labels = ["if condition"] + node_labels_c + node_labels_t + node_labels_f
+        edges_list = [(prefix + "if", nodes_c[0]), (prefix + "if", nodes_t[0]), (prefix + "if", nodes_f[0])] + edges_list_c + edges_list_t + edges_list_f
+        return nodes, node_labels, edges_list
+
+    def substitute(self, number, token):
+        if self.condition.INDICATOR == 'v' and self.condition.number == number:
+            # we have variable, let's replace it
+            self.condition = token
+        if self.t_value.INDICATOR == 'v' and self.t_value.number == number:
+            # we have variable, let's replace it
+            self.t_value = token
+        if self.f_value.INDICATOR == 'v' and self.f_value.number == number:
+            # we have variable, let's replace it
+            self.f_value = token
     
 
 class LambdaToken(CommonToken):
@@ -437,6 +547,49 @@ class LambdaToken(CommonToken):
     @property
     def has_lambdas(self):
         return True
+
+    def graph_data(self, prefix=""):
+        name = f"{self.INDICATOR}{self.number}"
+        expr_nodes, expr_node_labels, expr_edges_list = self.expression.graph_data(prefix + name)
+        
+        nodes = [prefix + name] + expr_nodes
+        node_labels = [f"lambda {self.number}"] + expr_node_labels
+        edges_list = [(prefix + name, expr_nodes[0])] + expr_edges_list
+        return nodes, node_labels, edges_list
+    
+    def simplify(self):
+        if self.expression.has_lambdas:
+            self.expression.simplify()
+        else:
+            value = self.expression()
+            self.expression = wrap_with_token(value)
+
+    def apply(self, token):
+        if not isinstance(token, CommonToken):
+            token = wrap_with_token(token)
+        token.simplify()
+        if self.expression.INDICATOR == "v":
+            if self.expression.number == self.number:
+                self.expression = token
+        else:
+            self.expression.substitute(self.number, token)
+        return self.expression
+
+    def substitute(self, number, token):
+        if self.number != number:
+            self.expression.substitute(number, token)
+        # if this lambda's number != number, try to substitute in the body of the method
+        
+
+        # if self.condition.INDICATOR == 'v' and self.condition.number == number:
+        #     # we have variable, let's replace it
+        #     self.condition = token
+        # if self.t_value.INDICATOR == 'v' and self.t_value.number == number:
+        #     # we have variable, let's replace it
+        #     self.t_value = token
+        # if self.f_value.INDICATOR == 'v' and self.f_value.number == number:
+        #     # we have variable, let's replace it
+        #     self.f_value = token
     #def apply(self, token):
     #    self.expression()
     #    pass
@@ -472,10 +625,31 @@ class VariableToken(CommonToken):
         body = token_str[1:]
         number = from_base94(body)
         return cls(number)
+
     def __str__(self):
         return F"{self.INDICATOR}{self.body}"
     
     def show(self):
         return F"{self.INDICATOR}{self.number}"
+
+    def graph_data(self, prefix=""):
+        name = f"{self.INDICATOR}{self.number}"
+
+        nodes = [prefix + name]
+        node_labels = [name] 
+        edges_list = []
+        return nodes, node_labels, edges_list
+
+    @property
+    def has_lambdas(self):
+        return True
+
+    def simplify(self):
+        # this is intentionally left blank
+        pass
+
+    def substitute(self, number, token):
+        # this is intentionally left blank
+        pass
     
 
