@@ -166,7 +166,7 @@ class BooleanToken(CommonToken):
         return self.value
 
     def graph_data(self, prefix=""):
-        return [prefix + self.indicator], [self.indicator], []
+        return [prefix + self.INDICATOR], [self.INDICATOR], []
 
     def substitute(self, number, token):
         pass
@@ -244,7 +244,7 @@ class StringToken(CommonToken):
 
     def take(self, int_token):
         n = int_token.value
-        print(n)
+        # print(n)
         return StringToken(self.value[:n])
 
     def drop(self, int_token):
@@ -396,11 +396,13 @@ class UnaryToken(CommonToken):
         return [ prefix + "u" ] + nodes, [ f"{self.INDICATOR}{self.name}" ] + node_labels, [(prefix + "u", nodes[0])] + edges_list
 
     def substitute(self, number, token):
+        # self.parameter.substitute(number, token)
         if self.parameter.INDICATOR == 'v' and self.parameter.number == number:
             # we have variable, let's replace it
             self.parameter = token
         else:
             self.parameter.substitute(number, token)
+        # self.parameter.substitute(number, token)
 
 
 class BinaryToken(CommonToken):
@@ -446,6 +448,8 @@ class BinaryToken(CommonToken):
         'D': lambda x, y: y.drop(x),
         
         '$': lambda x, y: x.apply(y),
+        # '$': lambda x, y: x.apply(y),
+        # '$': lambda x, y: x.apply(y),
     }
 
     def __init__(self, name, parameters):
@@ -465,13 +469,14 @@ class BinaryToken(CommonToken):
         assert self.name == "$"
         # self.parameters[0].simplify()
         # todo:
-        print("after simplify is called", self.parameters)
+        # print("after simplify is called", self.parameters)
         # print(self.parameters[0]())
-        assert self.parameters[0].INDICATOR == 'L', repr(self)
+        assert self.parameters[0].INDICATOR == 'L', str(self)
         lambda_abstraction = self.parameters[0]
         substituted_token = self.parameters[1]
         substituted_token = substituted_token.simplify()
         token = lambda_abstraction.apply(substituted_token)
+        # print("after apply", repr(token))
         if token.has_lambdas() or token.has_variables():
             token = token.simplify()
         else:
@@ -572,6 +577,8 @@ class BinaryToken(CommonToken):
             self.parameters[1] = token
         else:
             self.parameters[1].substitute(number, token)
+        #self.parameters[0].substitute(number, token)
+        #self.parameters[1].substitute(number, token)
 
 
 
@@ -588,6 +595,7 @@ class IfToken(CommonToken):
         self.f_value = parameters[2]
 
         self.cached_value = None
+        self.substitutions_list = []
 
     @classmethod
     def is_match(cls, text):
@@ -630,9 +638,11 @@ class IfToken(CommonToken):
     def simplify(self):
         if self.condition.has_lambdas() or self.condition.has_variables():
             self.condition = self.condition.simplify()
+            print("if condition, simplify", self.condition)
         else:
             value = self.condition()
             self.condition = wrap_with_token(value)
+            print("if condition, simpl2", value)
             if value:
                 if self.t_value.has_lambdas() or self.t_value.has_variables():
                     self.t_value = self.t_value.simplify()
@@ -672,6 +682,9 @@ class IfToken(CommonToken):
         return nodes, node_labels, edges_list
 
     def substitute(self, number, token):
+        # self.condition.substitute(number, token)
+        # self.t_value.substitute(number, token)
+        # self.f_value.substitute(number, token)
         if self.condition.INDICATOR == 'v' and self.condition.number == number:
             # we have variable, let's replace it
             self.condition = token
@@ -763,24 +776,29 @@ class LambdaToken(CommonToken):
             token = wrap_with_token(token)
         token = token.simplify()
         if self.expression.INDICATOR == "v":
-            print("comparing expression inficator with current one")
-            print(repr(self.expression), self.number)
+            # print("comparing expression inficator with current one")
+            # print(repr(self.expression), self.number)
             if self.expression.number == self.number:
                 self.expression = token
             else:
-                print("call substitute with number", self.number, repr(self.expression), repr(token))
+                # print("call substitute with number", self.number, repr(self.expression), repr(token))
                 self.expression.substitute(self.number, token)
         else:
-            print("call substitute", self.number, repr(self.expression), repr(token))
+            # print("call substitute in apply", self.number, repr(self.expression), repr(token))
             self.expression.substitute(self.number, token)
+        # if self.expression.INDICATOR == "v":
+            
+        # self.expression.substitute(self.number, token)
         return self.expression
 
     def substitute(self, number, token):
         if self.number != number:
+            #self.expression.substitute(number, token)
             if self.expression.INDICATOR == "v" and self.expression.number == number:
                 self.expression = token
             else:
                 self.expression.substitute(number, token)
+            # self.expression.substitute(number, token)
         # if this lambda's number != number, try to substitute in the body of the method
         
 
@@ -816,7 +834,8 @@ class VariableToken(CommonToken):
     def __init__(self, number):
         self.number = number
         self.body = to_base94(number)
-    
+        self.substitution_list = []
+
     @classmethod
     def is_match(cls, token_str):
         return (len(token_str) >= 2) and (token_str[0] == cls.INDICATOR)
@@ -856,6 +875,8 @@ class VariableToken(CommonToken):
     def substitute(self, number, token):
         # this is intentionally left blank
         pass
+        #self.substitution_list.append((number, token))
+
     # @property
     # def value(self):
     #     return self.number
@@ -863,6 +884,7 @@ class VariableToken(CommonToken):
         # class_name = self.__class__.__name__
         return f"{self.INDICATOR}{self.number}"
 
-    # def __call__(self):
-    #     return self
+    def __call__(self):
+        print(111)
+        return self
 
