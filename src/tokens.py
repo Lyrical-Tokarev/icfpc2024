@@ -177,6 +177,10 @@ class BooleanToken(CommonToken):
     def __and__(a, b):
         return wrap_with_token(a.value & b.value)
 
+    def copy(self):
+        return wrap_with_token(self.value)
+        pass
+
     # def __repr__(self):
     #     class_name = self.__class__.__name__
     #     return f"{class_name}<{self.INDICATOR}, {self.NUM_PARAMETERS}>({self.value})"
@@ -254,6 +258,10 @@ class StringToken(CommonToken):
     def concat(self, string_token):
         return StringToken(self.value + string_token.value)
 
+    def copy(self):
+        return wrap_with_token(self.value)
+        pass
+
 
 
 def to_base94(number, base_number=94, zero_char='!'):
@@ -313,6 +321,10 @@ class IntegerToken(CommonToken):
         return [ prefix+"i" ], [ str(self.value) ], []
 
     def substitute(self, number, token):
+        pass
+
+    def copy(self):
+        return wrap_with_token(self.value)
         pass
 
 
@@ -404,6 +416,10 @@ class UnaryToken(CommonToken):
             self.parameter.substitute(number, token)
         # self.parameter.substitute(number, token)
 
+    def copy(self):
+        return wrap_with_token(self.value)
+        pass
+
 
 class BinaryToken(CommonToken):
     
@@ -458,7 +474,10 @@ class BinaryToken(CommonToken):
         self.name = name #start_token[1:]
         self.parameters = parameters
         self.cached_value = None
-        
+
+    def copy(self):
+        return BinaryToken(self.name, [p.copy() for p in self.parameters])
+
     @classmethod
     def is_match(cls, text):
         return (len(text) >= 2) and (text[0] == cls.INDICATOR)
@@ -469,16 +488,17 @@ class BinaryToken(CommonToken):
         assert self.name == "$"
         # self.parameters[0].simplify()
         # todo:
-        # print("after simplify is called", self.parameters)
+        # print("call_bind is called", [p.show() for p in self.parameters])
         # print(self.parameters[0]())
         assert self.parameters[0].INDICATOR == 'L', str(self)
         lambda_abstraction = self.parameters[0]
         substituted_token = self.parameters[1]
-        substituted_token = substituted_token.simplify()
+        # substituted_token = substituted_token.simplify()
         token = lambda_abstraction.apply(substituted_token)
         # print("after apply", repr(token))
         if token.has_lambdas() or token.has_variables():
             token = token.simplify()
+            # pass
         else:
             token = token()
         self.cached_value = token
@@ -509,7 +529,8 @@ class BinaryToken(CommonToken):
         # do regular stuff
         self.parameters[1] = self.parameters[1].simplify()
         computed_parameter1 = self.parameters[1]()
-        
+        if self.name == "$": #and computed_parameter0.INDICATOR == "L":
+            print(repr(computed_parameter0), repr(computed_parameter1))
         self.cached_value = self.TOKEN_EXPRESSIONS[self.name](computed_parameter0, computed_parameter1)
         return self.cached_value
 
@@ -540,17 +561,20 @@ class BinaryToken(CommonToken):
         p0 = self.parameters[0]
         if p0.has_lambdas() or p0.has_variables():
             p0 = p0.simplify()
+            pass
         else:
             p0 = p0()
             self.parameters[0] = p0
         p1 = self.parameters[1]
         if p1.has_lambdas() or p1.has_variables():
-            p1 = p1.simplify()
+            # p1 = p1.simplify()
+            pass
         else:
             p1 = p1()
             self.parameters[1] = p1
         if self.name == "$" and p0.INDICATOR == "L":
-            return self.call_bind()
+            #return self.call_bind()
+            pass
         self.parameters = [p0, p1]
         # print("run simplify - end", self.name, self.parameters, self.cached_value)
         return self
@@ -590,12 +614,16 @@ class IfToken(CommonToken):
         # self.indicator = "B"
         # assert self.is_match(start_token)
         assert len(parameters) == self.NUM_PARAMETERS
+        self.name = name
         self.condition = parameters[0]
         self.t_value = parameters[1]
         self.f_value = parameters[2]
 
         self.cached_value = None
         self.substitutions_list = []
+
+    def copy(self):
+        return IfToken(self.name, [self.condition.copy(), self.t_value.copy(), self.f_value.copy()])
 
     @classmethod
     def is_match(cls, text):
@@ -705,6 +733,7 @@ class IfToken(CommonToken):
 class LambdaToken(CommonToken):
     INDICATOR = "L"
     NUM_PARAMETERS = 1
+
     def __init__(self, number, parameters):
         # self.number = from_base94(name)
         if isinstance(number, str):
@@ -717,6 +746,10 @@ class LambdaToken(CommonToken):
             self.expression = parameters[0]
         else:
             self.expression = wrap_with_token(parameters)
+        self.substitutions_list = []
+
+    def copy(self):
+        return LambdaToken(self.number, self.expression.copy())
 
     @classmethod
     def is_match(cls, text):
@@ -764,8 +797,10 @@ class LambdaToken(CommonToken):
         return nodes, node_labels, edges_list
     
     def simplify(self):
+        return self
         if self.expression.has_lambdas() or self.expression.has_variables():
-            self.expression = self.expression.simplify()
+            # self.expression = self.expression.simplify()
+            pass
         else:
             value = self.expression()
             self.expression = wrap_with_token(value)
@@ -775,17 +810,21 @@ class LambdaToken(CommonToken):
         if not isinstance(token, CommonToken):
             token = wrap_with_token(token)
         token = token.simplify()
+        for n, t in self.substitutions_list:
+            self.expression.substitute(n, t.copy())
+        self.substitutions_list = []
+
         if self.expression.INDICATOR == "v":
             # print("comparing expression inficator with current one")
             # print(repr(self.expression), self.number)
             if self.expression.number == self.number:
-                self.expression = token
+                self.expression = token.copy()
             else:
                 # print("call substitute with number", self.number, repr(self.expression), repr(token))
-                self.expression.substitute(self.number, token)
+                self.expression.substitute(self.number, token.copy())
         else:
             # print("call substitute in apply", self.number, repr(self.expression), repr(token))
-            self.expression.substitute(self.number, token)
+            self.expression.substitute(self.number, token.copy())
         # if self.expression.INDICATOR == "v":
             
         # self.expression.substitute(self.number, token)
@@ -795,9 +834,11 @@ class LambdaToken(CommonToken):
         if self.number != number:
             #self.expression.substitute(number, token)
             if self.expression.INDICATOR == "v" and self.expression.number == number:
-                self.expression = token
+                self.expression = token.copy()
             else:
-                self.expression.substitute(number, token)
+                # todo: add lazyness
+                self.substitutions_list.append((number, token.copy()))
+                # self.expression.substitute(number, token)
             # self.expression.substitute(number, token)
         # if this lambda's number != number, try to substitute in the body of the method
         
@@ -839,6 +880,9 @@ class VariableToken(CommonToken):
     @classmethod
     def is_match(cls, token_str):
         return (len(token_str) >= 2) and (token_str[0] == cls.INDICATOR)
+
+    def copy(self):
+        return VariableToken(self.number)
 
     @classmethod
     def parse(cls, token_str):
